@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Area, AreaChart, BarChart, Bar, ComposedChart } from 'recharts';
-import { Calendar, TrendingUp, Home, FileText, RefreshCw, AlertTriangle, Menu, X, Calculator, DollarSign, MapPin } from 'lucide-react';
+import { Calendar, TrendingUp, Home, FileText, RefreshCw, AlertTriangle, Menu, X, Calculator, DollarSign, MapPin, CalendarDays } from 'lucide-react';
 
 const EconomicTrendsDashboard = () => {
   const [selectedTimeRange, setSelectedTimeRange] = useState('30y');
@@ -14,6 +14,13 @@ const EconomicTrendsDashboard = () => {
     income: 75000,
     downPayment: 20,
     loanTerm: 30
+  });
+  const [amortizationInputs, setAmortizationInputs] = useState({
+    loanAmount: 400000,
+    interestRate: 6.88,
+    loanTerm: 30,
+    startDate: '2025-01',
+    extraPayment: 0
   });
 
   // Check for mobile on mount and resize
@@ -264,10 +271,110 @@ const EconomicTrendsDashboard = () => {
 
   const affordabilityCalc = calculateAffordability();
 
+  // Calculate amortization schedule
+  const calculateAmortization = () => {
+    const { loanAmount, interestRate, loanTerm, startDate, extraPayment } = amortizationInputs;
+    const monthlyRate = interestRate / 100 / 12;
+    const numPayments = loanTerm * 12;
+    
+    // Calculate monthly payment
+    const monthlyPayment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, numPayments)) / (Math.pow(1 + monthlyRate, numPayments) - 1);
+    
+    // Calculate standard schedule (no extra payments)
+    let balance = loanAmount;
+    const standardSchedule = [];
+    const startDateObj = new Date(startDate + '-01');
+    
+    for (let i = 1; i <= numPayments; i++) {
+      const interestPayment = balance * monthlyRate;
+      const principalPayment = monthlyPayment - interestPayment;
+      balance = balance - principalPayment;
+      
+      const paymentDate = new Date(startDateObj);
+      paymentDate.setMonth(paymentDate.getMonth() + i - 1);
+      
+      standardSchedule.push({
+        paymentNumber: i,
+        date: paymentDate,
+        monthYear: paymentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        monthlyPayment: monthlyPayment,
+        principalPayment: principalPayment,
+        interestPayment: interestPayment,
+        remainingBalance: Math.max(0, balance),
+        cumulativeInterest: standardSchedule.reduce((sum, payment) => sum + payment.interestPayment, interestPayment),
+        cumulativePrincipal: loanAmount - Math.max(0, balance)
+      });
+    }
+    
+    // Calculate schedule with extra payments
+    let extraBalance = loanAmount;
+    const extraSchedule = [];
+    let extraPaymentCount = 0;
+    
+    for (let i = 1; i <= numPayments && extraBalance > 0.01; i++) {
+      const interestPayment = extraBalance * monthlyRate;
+      let principalPayment = monthlyPayment - interestPayment;
+      
+      // Add extra payment to principal
+      if (extraPayment > 0) {
+        principalPayment += extraPayment;
+      }
+      
+      // Don't overpay
+      if (principalPayment > extraBalance) {
+        principalPayment = extraBalance;
+      }
+      
+      extraBalance = extraBalance - principalPayment;
+      extraPaymentCount = i;
+      
+      const paymentDate = new Date(startDateObj);
+      paymentDate.setMonth(paymentDate.getMonth() + i - 1);
+      
+      extraSchedule.push({
+        paymentNumber: i,
+        date: paymentDate,
+        monthYear: paymentDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+        monthlyPayment: monthlyPayment + extraPayment,
+        principalPayment: principalPayment,
+        interestPayment: interestPayment,
+        remainingBalance: Math.max(0, extraBalance),
+        cumulativeInterest: extraSchedule.reduce((sum, payment) => sum + payment.interestPayment, interestPayment),
+        cumulativePrincipal: loanAmount - Math.max(0, extraBalance)
+      });
+      
+      if (extraBalance <= 0.01) break;
+    }
+    
+    const standardTotalInterest = standardSchedule.reduce((sum, payment) => sum + payment.interestPayment, 0);
+    const extraTotalInterest = extraSchedule.reduce((sum, payment) => sum + payment.interestPayment, 0);
+    const interestSavings = standardTotalInterest - extraTotalInterest;
+    const timeSavings = numPayments - extraPaymentCount;
+    const timeSavingsYears = Math.floor(timeSavings / 12);
+    const timeSavingsMonths = timeSavings % 12;
+    
+    return {
+      schedule: extraPayment > 0 ? extraSchedule : standardSchedule,
+      standardSchedule: standardSchedule,
+      extraSchedule: extraSchedule,
+      monthlyPayment,
+      totalInterest: extraPayment > 0 ? extraTotalInterest : standardTotalInterest,
+      totalPayments: (monthlyPayment + extraPayment) * (extraPayment > 0 ? extraPaymentCount : numPayments),
+      interestSavings: interestSavings,
+      timeSavings: timeSavings,
+      timeSavingsYears: timeSavingsYears,
+      timeSavingsMonths: timeSavingsMonths,
+      payoffDate: extraPayment > 0 ? extraSchedule[extraSchedule.length - 1]?.monthYear : standardSchedule[standardSchedule.length - 1]?.monthYear
+    };
+  };
+
+  const amortizationCalc = calculateAmortization();
+
   const tabs = [
     { id: 'trends', label: isMobile ? 'Trends' : 'Rates & Prices', icon: TrendingUp },
     { id: 'corrections', label: isMobile ? 'Corrections' : 'Market Corrections', icon: AlertTriangle },
     { id: 'affordability', label: isMobile ? 'Calculator' : 'Affordability Calculator', icon: Calculator },
+    { id: 'amortization', label: isMobile ? 'Amortization' : 'Loan Amortization', icon: CalendarDays },
     { id: 'las-vegas', label: isMobile ? 'Las Vegas' : 'Las Vegas Analysis', icon: MapPin },
     { id: 'regional', label: isMobile ? 'Regional' : 'Regional Analysis', icon: Home },
     { id: 'policy', label: isMobile ? 'Policy' : 'Policy Timeline', icon: FileText },
@@ -640,6 +747,318 @@ const EconomicTrendsDashboard = () => {
                       </div>
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Amortization Calculator */}
+          {activeTab === 'amortization' && (
+            <div className="space-y-6">
+              <div className="bg-white rounded-lg border p-4">
+                <div className="flex items-center mb-4">
+                  <CalendarDays className="w-6 h-6 text-blue-600 mr-3" />
+                  <h3 className="text-lg font-semibold">Loan Amortization Calculator</h3>
+                </div>
+                
+                {/* Amortization Inputs */}
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Loan Amount</label>
+                    <input
+                      type="number"
+                      value={amortizationInputs.loanAmount}
+                      onChange={(e) => setAmortizationInputs({...amortizationInputs, loanAmount: parseInt(e.target.value) || 0})}
+                      className="w-full p-2 border rounded-lg"
+                      placeholder="400000"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Interest Rate (%)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={amortizationInputs.interestRate}
+                      onChange={(e) => setAmortizationInputs({...amortizationInputs, interestRate: parseFloat(e.target.value) || 0})}
+                      className="w-full p-2 border rounded-lg"
+                      placeholder="6.88"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Loan Term (Years)</label>
+                    <select
+                      value={amortizationInputs.loanTerm}
+                      onChange={(e) => setAmortizationInputs({...amortizationInputs, loanTerm: parseInt(e.target.value)})}
+                      className="w-full p-2 border rounded-lg"
+                    >
+                      <option value={15}>15 Years</option>
+                      <option value={20}>20 Years</option>
+                      <option value={25}>25 Years</option>
+                      <option value={30}>30 Years</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Start Date</label>
+                    <input
+                      type="month"
+                      value={amortizationInputs.startDate}
+                      onChange={(e) => setAmortizationInputs({...amortizationInputs, startDate: e.target.value})}
+                      className="w-full p-2 border rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Extra Payment ($)</label>
+                    <input
+                      type="number"
+                      value={amortizationInputs.extraPayment}
+                      onChange={(e) => setAmortizationInputs({...amortizationInputs, extraPayment: parseFloat(e.target.value) || 0})}
+                      className="w-full p-2 border rounded-lg"
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+
+                {/* Loan Summary */}
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+                  <div className="bg-blue-50 p-4 rounded-lg text-center">
+                    <h4 className="font-semibold text-blue-800">Monthly Payment</h4>
+                    <p className="text-2xl font-bold text-blue-900">${Math.round(amortizationCalc.monthlyPayment).toLocaleString()}</p>
+                    {amortizationInputs.extraPayment > 0 && (
+                      <p className="text-sm text-blue-700">+${amortizationInputs.extraPayment} extra</p>
+                    )}
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-lg text-center">
+                    <h4 className="font-semibold text-green-800">Total Interest</h4>
+                    <p className="text-2xl font-bold text-green-900">${Math.round(amortizationCalc.totalInterest).toLocaleString()}</p>
+                    {amortizationInputs.extraPayment > 0 && amortizationCalc.interestSavings > 0 && (
+                      <p className="text-sm text-green-700">Save ${Math.round(amortizationCalc.interestSavings).toLocaleString()}</p>
+                    )}
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-lg text-center">
+                    <h4 className="font-semibold text-purple-800">Total Payments</h4>
+                    <p className="text-2xl font-bold text-purple-900">${Math.round(amortizationCalc.totalPayments).toLocaleString()}</p>
+                  </div>
+                  <div className="bg-orange-50 p-4 rounded-lg text-center">
+                    <h4 className="font-semibold text-orange-800">Payoff Date</h4>
+                    <p className="text-2xl font-bold text-orange-900">{amortizationCalc.payoffDate}</p>
+                    {amortizationInputs.extraPayment > 0 && amortizationCalc.timeSavingsYears > 0 && (
+                      <p className="text-sm text-orange-700">
+                        {amortizationCalc.timeSavingsYears}y {amortizationCalc.timeSavingsMonths}m early
+                      </p>
+                    )}
+                  </div>
+                  <div className="bg-red-50 p-4 rounded-lg text-center">
+                    <h4 className="font-semibold text-red-800">Interest %</h4>
+                    <p className="text-2xl font-bold text-red-900">{((amortizationCalc.totalInterest / amortizationInputs.loanAmount) * 100).toFixed(1)}%</p>
+                  </div>
+                </div>
+
+                {/* Extra Payment Impact Alert */}
+                {amortizationInputs.extraPayment > 0 && (
+                  <div className="mb-6 p-4 bg-gradient-to-r from-green-50 to-blue-50 rounded-lg border-2 border-green-200">
+                    <div className="flex items-center mb-2">
+                      <span className="text-2xl mr-2">💡</span>
+                      <h4 className="font-bold text-green-800">Extra Payment Impact</h4>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                      <div className="text-center p-3 bg-white rounded border">
+                        <p className="font-semibold text-green-800">Interest Savings</p>
+                        <p className="text-xl font-bold text-green-900">${Math.round(amortizationCalc.interestSavings).toLocaleString()}</p>
+                      </div>
+                      <div className="text-center p-3 bg-white rounded border">
+                        <p className="font-semibold text-blue-800">Time Savings</p>
+                        <p className="text-xl font-bold text-blue-900">
+                          {amortizationCalc.timeSavingsYears} years {amortizationCalc.timeSavingsMonths} months
+                        </p>
+                      </div>
+                      <div className="text-center p-3 bg-white rounded border">
+                        <p className="font-semibold text-purple-800">Monthly Extra</p>
+                        <p className="text-xl font-bold text-purple-900">${amortizationInputs.extraPayment}</p>
+                      </div>
+                    </div>
+                    <p className="text-xs text-green-700 mt-2 text-center">
+                      Adding <strong>${amortizationInputs.extraPayment}/month</strong> saves{' '}
+                      <strong>${Math.round(amortizationCalc.interestSavings).toLocaleString()}</strong> in interest
+                      and pays off the loan <strong>{amortizationCalc.timeSavingsYears} years {amortizationCalc.timeSavingsMonths} months early</strong>.
+                    </p>
+                  </div>
+                )}
+
+                {/* Quick Extra Payment Buttons */}
+                <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+                  <h4 className="font-semibold mb-3">Try Common Extra Payment Amounts:</h4>
+                  <div className="flex flex-wrap gap-2">
+                    {[0, 50, 100, 200, 500, 1000].map(amount => (
+                      <button
+                        key={amount}
+                        onClick={() => setAmortizationInputs({...amortizationInputs, extraPayment: amount})}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                          amortizationInputs.extraPayment === amount
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white border border-gray-300 hover:bg-gray-100'
+                        }`}
+                      >
+                        {amount === 0 ? 'No Extra' : `${amount}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Principal vs Interest Chart */}
+                <div className="mb-6">
+                  <h4 className="font-semibold mb-4">Principal vs Interest Over Time</h4>
+                  <ResponsiveContainer width="100%" height={isMobile ? 250 : 300}>
+                    <AreaChart data={amortizationCalc.schedule.filter((_, index) => index % 12 === 0)}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis 
+                        dataKey="monthYear" 
+                        interval="preserveStartEnd"
+                        tick={{ fontSize: isMobile ? 10 : 12 }}
+                      />
+                      <YAxis 
+                        tickFormatter={(value) => `${(value / 1000).toFixed(0)}K`}
+                        tick={{ fontSize: isMobile ? 10 : 12 }}
+                      />
+                      <Tooltip 
+                        formatter={(value, name) => [`${value.toLocaleString()}`, name]}
+                        labelFormatter={(label) => `Date: ${label}`}
+                      />
+                      <Legend />
+                      <Area
+                        type="monotone"
+                        dataKey="cumulativePrincipal"
+                        stackId="1"
+                        stroke="#2563eb"
+                        fill="#93c5fd"
+                        name="Cumulative Principal"
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="cumulativeInterest"
+                        stackId="1"
+                        stroke="#dc2626"
+                        fill="#fca5a5"
+                        name="Cumulative Interest"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+
+                {/* Payment Calendar View */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* First Year Breakdown */}
+                  <div>
+                    <h4 className="font-semibold mb-4">First Year Payment Breakdown</h4>
+                    <div className="max-h-64 overflow-y-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 sticky top-0">
+                          <tr>
+                            <th className="p-2 text-left">Month</th>
+                            <th className="p-2 text-right">Principal</th>
+                            <th className="p-2 text-right">Interest</th>
+                            <th className="p-2 text-right">Balance</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {amortizationCalc.schedule.slice(0, 12).map((payment, index) => (
+                            <tr key={index} className="border-b">
+                              <td className="p-2">{payment.monthYear}</td>
+                              <td className="p-2 text-right text-green-600">${Math.round(payment.principalPayment).toLocaleString()}</td>
+                              <td className="p-2 text-right text-red-600">${Math.round(payment.interestPayment).toLocaleString()}</td>
+                              <td className="p-2 text-right">${Math.round(payment.remainingBalance).toLocaleString()}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Key Milestones */}
+                  <div>
+                    <h4 className="font-semibold mb-4">Loan Milestones</h4>
+                    <div className="space-y-3">
+                      {[
+                        { percent: 25, label: '25% Paid Off' },
+                        { percent: 50, label: '50% Paid Off' },
+                        { percent: 75, label: '75% Paid Off' },
+                        { percent: 100, label: 'Loan Payoff' }
+                      ].map((milestone, index) => {
+                        const targetBalance = amortizationInputs.loanAmount * (1 - milestone.percent / 100);
+                        const milestonePayment = amortizationCalc.schedule.find(p => p.remainingBalance <= targetBalance);
+                        
+                        return (
+                          <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                            <span className="font-medium">{milestone.label}</span>
+                            <div className="text-right">
+                              <div className="text-sm">{milestonePayment?.monthYear || 'N/A'}</div>
+                              <div className="text-xs text-gray-600">
+                                Payment #{milestonePayment?.paymentNumber || 'N/A'}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Extra Payment Impact */}
+                    <div className="mt-4 p-3 bg-blue-50 rounded border border-blue-200">
+                      <h5 className="font-medium text-blue-800 mb-2">💡 Interactive Extra Payment Calculator</h5>
+                      <p className="text-xs text-blue-700">
+                        Use the "Extra Payment" field above to see real-time impact on your loan!
+                        Try common amounts: $50, $100, $200, or $500/month.
+                      </p>
+                      {amortizationInputs.extraPayment > 0 ? (
+                        <p className="text-xs text-blue-800 mt-2 font-medium">
+                          Current extra payment: <strong>${amortizationInputs.extraPayment}/month</strong> saves{' '}
+                          <strong>${Math.round(amortizationCalc.interestSavings).toLocaleString()}</strong> in interest!
+                        </p>
+                      ) : (
+                        <p className="text-xs text-blue-800 mt-2">
+                          <strong>Tip:</strong> Even $100/month extra can save tens of thousands in interest!
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Yearly Summary Table */}
+                <div className="mt-6">
+                  <h4 className="font-semibold mb-4">Annual Payment Summary</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="p-3 text-left">Year</th>
+                          <th className="p-3 text-right">Annual Principal</th>
+                          <th className="p-3 text-right">Annual Interest</th>
+                          <th className="p-3 text-right">Year-End Balance</th>
+                          <th className="p-3 text-right">Equity Built</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Array.from({ length: Math.min(10, amortizationInputs.loanTerm) }, (_, yearIndex) => {
+                          const yearPayments = amortizationCalc.schedule.slice(yearIndex * 12, (yearIndex + 1) * 12);
+                          const annualPrincipal = yearPayments.reduce((sum, p) => sum + p.principalPayment, 0);
+                          const annualInterest = yearPayments.reduce((sum, p) => sum + p.interestPayment, 0);
+                          const yearEndBalance = yearPayments[yearPayments.length - 1]?.remainingBalance || 0;
+                          const equityBuilt = amortizationInputs.loanAmount - yearEndBalance;
+                          
+                          return (
+                            <tr key={yearIndex} className="border-b hover:bg-gray-50">
+                              <td className="p-3 font-medium">{yearIndex + 1}</td>
+                              <td className="p-3 text-right text-green-600">${Math.round(annualPrincipal).toLocaleString()}</td>
+                              <td className="p-3 text-right text-red-600">${Math.round(annualInterest).toLocaleString()}</td>
+                              <td className="p-3 text-right">${Math.round(yearEndBalance).toLocaleString()}</td>
+                              <td className="p-3 text-right font-medium">${Math.round(equityBuilt).toLocaleString()}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {amortizationInputs.loanTerm > 10 && (
+                    <p className="text-xs text-gray-600 mt-2">Showing first 10 years. Full schedule available on scroll above.</p>
+                  )}
                 </div>
               </div>
             </div>
