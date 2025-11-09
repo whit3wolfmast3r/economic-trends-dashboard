@@ -795,6 +795,7 @@ const EconomicTrendsDashboard = () => {
                       <option value={20}>20 Years</option>
                       <option value={25}>25 Years</option>
                       <option value={30}>30 Years</option>
+                      <option value={50}>50 Years</option>
                     </select>
                   </div>
                   <div>
